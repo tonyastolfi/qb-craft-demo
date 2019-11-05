@@ -177,6 +177,7 @@ private:
   //
   Node root_;
 
+  //============================================================================
 public:
   // TODO - to same coding time for this exercise, STL-container style copy
   // semantics are disabled; we could implement these.
@@ -209,7 +210,7 @@ public:
   // Invokes `fn` for each mapped value whose key matches `key` exactly.
   //
   template <typename Fn /* void(const T &) */>
-  void for_each_exact(std::string_view key, Fn &&fn) {
+  void for_each_exact_match(std::string_view key, Fn &&fn) {
     Node *node = find_node(key, /*create=*/false);
     if (!node) {
       return;
@@ -220,7 +221,7 @@ public:
   // Invokes `fn` for each mapped value whose key starts with `key_prefix`.
   //
   template <typename Fn /* void(const T &) */>
-  void for_each_prefix(std::string_view key_prefix, Fn &&fn) {
+  void for_each_prefix_match(std::string_view key_prefix, Fn &&fn) {
     Node *node = find_node(key_prefix, /*create=*/false);
     if (!node) {
       return;

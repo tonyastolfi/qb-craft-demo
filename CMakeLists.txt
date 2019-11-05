@@ -7,6 +7,9 @@ include_directories(. ./src)
 include(${CMAKE_BINARY_DIR}/conanbuildinfo.cmake)
 conan_basic_setup()
 
+add_library(QBCraftDemo
+            src/qb_record_collection.cpp)
+
 add_executable(TrieTest src/trie_test.cpp)
 target_link_libraries(TrieTest ${CONAN_LIBS_GTEST})
 

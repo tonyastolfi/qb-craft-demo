@@ -87,7 +87,7 @@ TEST(TrieTest, SubstringSearch) {
 
     auto start2 = steady_clock::now();
     std::set<int> actual;
-    index.for_each_prefix(pattern, [&](int i) { actual.insert(i); });
+    index.for_each_prefix_match(pattern, [&](int i) { actual.insert(i); });
     total_fast += elapsed_seconds(start2);
 
     EXPECT_THAT(actual, ::testing::ContainerEq(expected));
