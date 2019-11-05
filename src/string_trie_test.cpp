@@ -1,4 +1,4 @@
-#include "trie.hpp"
+#include "string_trie.hpp"
 
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"

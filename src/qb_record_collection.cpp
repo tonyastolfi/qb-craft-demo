@@ -1,29 +1,44 @@
 #include "qb_record_collection.hpp"
 
-bool QBRecordCollection::insert(QBRecord &&record) {
-  if (by_unique_id_.count(record.column0)) {
+#include <boost/lexical_cast.hpp>
+
+// Local helper functions.
+//
+namespace {
+
+decltype(auto) get_unique_id(const QBRecordCollection::record_type &record) {
+  return std::get<QBRecordCollection::traits_type::unique_id_column()>(record);
+}
+
+} // namespace
+
+bool QBRecordCollection::insert(record_type &&record) {
+  const auto id = get_unique_id(record);
+  if (by_unique_id_.count(id)) {
     return false;
   }
 
-  by_unique_id_.emplace(record.column0,
-                        QBRecordIntern{
-                            /*column1=*/std::move(record.column1),
-                            /*column2=*/record.column2,
-                            /*column3=*/std::move(record.column3),
-                        });
+  auto[iter, inserted] =
+      by_unique_id_.emplace(id, drop_first(std::move(record)));
 
-  by_column1_.insert_suffixes(record.column1, record.column0);
-  by_column2_.emplace(record.column2, record.column0);
-  by_column3_.insert_suffixes(record.column3, record.column0);
+  assert(inserted);
+
+  const auto &stored = iter->second;
+
+  for_each_upto<num_columns() - 1>([&](auto i) {
+    constexpr int I = decltype(i)::value;
+    std::get<I>(lookups_).insert(id, std::get<I>(stored));
+  });
 
   return true;
 }
 
-std::vector<QBRecord> QBRecordCollection::find_matching_records(
-    const std::string &columnName, const std::string &matchString) const {
+auto QBRecordCollection::find_matching_records(
+    std::string_view columnName, std::string_view matchString) const
+    -> std::vector<record_type> {
 
   auto maybe_column_num = parse_column_name<QBRecordTraits>(columnName);
-  if (!maybe_column_num.has_value()) {
+  if (!maybe_column_num) {
     // TODO - maybe report this error in a more dramatic way?
     return {};
   }
@@ -31,10 +46,9 @@ std::vector<QBRecord> QBRecordCollection::find_matching_records(
 
   // The set of matching records to return.
   //
-  std::vector<QBRecord> results;
+  std::vector<record_type> results;
 
   // -- Local Helper Functions ---------------------------------------------
-
   // Given a unique id (column0), looks up and adds the corresponding record
   // to the result set, returning true if the record was found, false
   // otherwise.
@@ -42,62 +56,28 @@ std::vector<QBRecord> QBRecordCollection::find_matching_records(
   const auto addByUniqueId = [&](unique_id_type key) {
     auto record_iter = by_unique_id_.find(key);
     if (record_iter != by_unique_id_.end()) {
-      results.emplace_back(QBRecord{
-          key, *record_iter->second.column1, record_iter->second.column2,
-          *record_iter->second.column3,
-      });
+      results.emplace_back(
+          std::tuple_cat(std::make_tuple(key), record_iter->second));
       return true;
     }
     return false;
   };
-
-  // Given `match_range`, a pair of ForwardIterator values defining a range
-  // of secondary index items, look up the corresponding record by its
-  // unique id (`second` of each item in the range) and add it to the
-  // result set.
-  //
-  const auto addMatchingRange = [&](const auto &match_range) {
-    std::for_each(match_range.first, match_range.second,
-                  [&](const auto &item) { addByColumn0(item.second); });
-  };
-
   // -----------------------------------------------------------------------
 
+  // Find and add all matching records.
+  //
   if (column_num == QBRecordTraits::unique_id_column()) {
-    addByUniqueId(std::stoul(matchString));
+    // Add the record with the specified id directly.
+    //
+    addByUniqueId(boost::lexical_cast<unique_id_type>(matchString));
   } else {
+    // Use the appropriate index for the search column.
+    //
+    visit_tuple_element(
+        column_num - 1, lookups_, [&](const auto &column_lookup) {
+          column_lookup.for_each_match(matchString, addByUniqueId);
+        });
   }
 
-  // If the range is non-empty, then find matching records using the
-  // appropriate per-column index.
-  //
-
-  // Use the appropriate index for the search column.
-  //
-  switch () {
-  case 0:
-    addByColumn0(std::stoul(matchString));
-    break;
-  case 1:
-    by_column1_.for_each_prefix_match(matchString, addByColumn0);
-    break;
-  case 2:
-    addMatchingRange(by_column2_.equal_range(std::stol(matchString)));
-    break;
-  case 3:
-    by_column3_.for_each_prefix_match(matchString, addByColumn0);
-    break;
-  default:
-    std::cerr << "Invalid column name: " << columnName << std::endl;
-    std::terminate();
-  }
-}
-
-// Done!
-//
-return results;
-}
-
-const std::string *InternString(std::string &&s) {
-  return &*strings_.emplace(std::move(s)).first;
+  return results;
 }

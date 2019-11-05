@@ -3,10 +3,14 @@
 //
 #pragma once
 
+#include <algorithm>
 #include <string_view>
-#include <unordered_multimap>
+#include <unordered_map>
 
-#include "StringTrie.hpp"
+#include <boost/lexical_cast.hpp>
+
+#include "string_trie.hpp"
+#include "tuples.hpp"
 
 /* Lookup table type for a given column type (Value) and unique id type
  * (UniqueId).
@@ -38,8 +42,8 @@ template <typename UniqueId> class QBColumnLookup<UniqueId, long> {
 public:
   void insert(UniqueId rowId, long columnValue);
 
-  void find_matching_records(std::string_view matchString,
-                             std::function<void(UniqueId)> emitRecord);
+  void for_each_match(std::string_view matchString,
+                      std::function<void(UniqueId)> emitRecord) const;
 
 private:
   std::unordered_multimap<long, UniqueId> impl_;
@@ -53,11 +57,16 @@ template <typename UniqueId> class QBColumnLookup<UniqueId, std::string> {
 public:
   void insert(UniqueId rowId, std::string_view value);
 
-  void find_matching_records(std::string_view matchString,
-                             std::function<void(UniqueId)> emitRecord);
+  void for_each_match(std::string_view matchString,
+                      std::function<void(UniqueId)> emitRecord) const;
 
 private:
-  StringTrie<UniqueId> impl_;
+  // TODO - fix this; this is needed because the way we are generically
+  // transforming a record tuple into a tuple of QBColumnLookup objects requires
+  // copy/move construction (which is currently not implemented in StringTrie).
+  //
+  std::unique_ptr<StringTrie<UniqueId>> impl_ =
+      std::make_unique<StringTrie<UniqueId>>();
 };
 
 //
@@ -66,12 +75,12 @@ private:
 // Returns a tuple of lookup tables for the columns of a given record type.
 //
 template <typename Tuple> auto make_lookups_for_columns(Tuple &&record) {
-  using FirstColumn = std::tuple_element_t<std::decay_t<Tuple>, 0>;
+  using FirstColumn = std::tuple_element_t<0, std::decay_t<Tuple>>;
   using OtherColumns = decltype(drop_first(std::forward<Tuple>(record)));
 
   using UniqueId = FirstColumn;
 
-  return tuple_map(
+  return tuple_transform(
       drop_first(
           std::forward<Tuple>(record)), // Don't include the Unique Id column
       [](auto &&column) {
@@ -82,3 +91,47 @@ template <typename Tuple> auto make_lookups_for_columns(Tuple &&record) {
 template <typename RecordTuple>
 using LookupsForRecord =
     decltype(make_lookups_for_columns(std::declval<RecordTuple>()));
+
+// =============================================================================
+// Partial Template Instantiation Impls
+// =============================================================================
+
+// -- Integer (long) lookup ----------------------------------------------------
+//
+template <typename UniqueId>
+void QBColumnLookup<UniqueId, long>::insert(UniqueId rowId, long columnValue) {
+  impl_.emplace(columnValue, rowId);
+}
+
+template <typename UniqueId>
+void QBColumnLookup<UniqueId, long>::for_each_match(
+    std::string_view matchString,
+    std::function<void(UniqueId)> emitRecord) const {
+  // Parse the matchString.
+  //
+  const long matchNumber = boost::lexical_cast<long>(matchString);
+
+  // Find it in the hash table.
+  //
+  const auto found = impl_.equal_range(matchNumber);
+
+  // Emit all matches.
+  //
+  std::for_each(found.first, found.second,
+                [&](const auto &item) { emitRecord(item.second); });
+}
+
+// -- String lookup ------------------------------------------------------------
+//
+template <typename UniqueId>
+void QBColumnLookup<UniqueId, std::string>::insert(UniqueId rowId,
+                                                   std::string_view value) {
+  impl_->insert_suffixes(value, rowId);
+}
+
+template <typename UniqueId>
+void QBColumnLookup<UniqueId, std::string>::for_each_match(
+    std::string_view matchString,
+    std::function<void(UniqueId)> emitRecord) const {
+  impl_->for_each_prefix_match(matchString, emitRecord);
+}
