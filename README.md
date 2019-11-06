@@ -38,9 +38,32 @@ fields (which require an exact match) and string fields (which require
 substring matching and therefore are indexed using a string suffix
 trie data structure).
 
-
+The other key element of my design is changing the QBRecord type to a
+std::tuple and adding compile-time metadata in the form of
+QBRecordTraits to drive the record collection implementation in a way
+that is general with respect to the number and types of columns.  This
+approach reduces the amount of code and enhances the
+reusability/extensibility of the design at the cost of some more
+complex/sophisticated programming techniques (some template
+meta-programming).
 
 ## Test Plan
 
+See:
+
+ - `src/qb_record_collection_test.cpp`
+ - `src/string_trie_test.cpp`
+
 ## Alternative Designs
 
+- Instead of trie-based string indexing maybe use bi-gram and/or
+  tri-gram bucketing of strings as a first-pass filter, then a brute
+  force approach like the original baseline.
+
+## TODOs
+
+- The last few test points are not yet implemented
+- It would be good to do stress/performance testing comparison between
+  the new impl and the baseline.  The StringTrie test gives some
+  notion of the speedup, but we should also measure memory usage and
+  indexing time more explicitly.
