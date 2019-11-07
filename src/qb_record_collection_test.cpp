@@ -8,6 +8,7 @@
 #include <random>
 
 #include "baseline.hpp"
+#include "timer.hpp"
 #include "words.hpp"
 
 namespace {
@@ -70,8 +71,18 @@ protected:
   }
 
   std::default_random_engine rng_{/*seed=*/1};
-  std::vector<std::string> words_ = load_words();
+
+  // All three-letter dictionary words.
+  //
+  std::vector<std::string> words_ =
+      load_words([](std::string_view word) { return word.length() == 3; });
+
+  // The collection under test.
+  //
   QBRecordCollection db_;
+
+  // The baseline implementation.
+  //
   baseline::QBRecordCollection base_;
 };
 
@@ -151,7 +162,7 @@ TEST_F(QBRecordCollectionTest, StringSingleMatch) {
 
   std::string pattern;
   for (const auto &r : base_) {
-    if (r.column1.length() > 9) {
+    if (r.column1.length() == 9) {
       pattern = r.column1.substr(2, 6);
       if (baseline::QBFindMatchingRecords(base_, "column1", pattern).size() ==
           1) {
@@ -161,7 +172,7 @@ TEST_F(QBRecordCollectionTest, StringSingleMatch) {
   }
 
   auto results = db_.find_matching_records("column1", pattern);
-  ASSERT_THAT(results, ::testing::SizeIs(1));
+  ASSERT_THAT(results, ::testing::SizeIs(1)) << "pattern=" << pattern;
   EXPECT_THAT(std::get<1>(results[0]), ::testing::HasSubstr(pattern));
 }
 
@@ -186,7 +197,7 @@ TEST_F(QBRecordCollectionTest, IntegerSingleMatch) {
 TEST_F(QBRecordCollectionTest, StringManyMatch) {
   populateRecords(100);
 
-  auto results = db_.find_matching_records("column3", "th");
+  auto results = db_.find_matching_records("column3", "e");
 
   EXPECT_GT(results.size(), 2u);
 }
@@ -196,34 +207,72 @@ TEST_F(QBRecordCollectionTest, StringManyMatch) {
 //
 TEST_F(QBRecordCollectionTest, IntegerManyMatch) {}
 
-//  6. Stress test (large database, >10 million entries)
-//     Repeatedly query for:
-//     a. no matches
-//
-TEST_F(QBRecordCollectionTest, Stress_NoMatch) {}
+TEST_F(QBRecordCollectionTest, Perf) {
+  using std::chrono::steady_clock;
 
-//  6. Stress test (large database, >10 million entries)
-//     Repeatedly query for:
-//     b. one match
-//
-TEST_F(QBRecordCollectionTest, Stress_SingleMatch) {}
+  std::cerr << "RECORDS LOOP NEW_ID(q/s) BASE_ID(q/s) NEW_NUM(q/s) "
+               "BASE_NUM(q/s) NEW_STR(q/s) BASE_STR(q/s)"
+            << std::endl;
 
-//  6. Stress test (large database, >10 million entries)
-//     Repeatedly query for:
-//     c. few matches
-//
-TEST_F(QBRecordCollectionTest, Stress_FewMatches) {}
+  for (int count : {10, 100, 1000, 10 * 1000}) {
+    populateRecords(count);
+    for (int loop = 0; loop < 10; ++loop) {
+      std::cerr << count << " " << loop;
 
-//  6. Stress test (large database, >10 million entries)
-//     Repeatedly query for:
-//     d. many matches
-//
-TEST_F(QBRecordCollectionTest, Stress_ManyMatches) {}
+      // Search for all ids.
+      //
+      {
+        auto start = steady_clock::now();
+        for (QBRecordCollection::unique_id_type id = 0; id < count; ++id) {
+          db_.find_matching_records("column0", std::to_string(id));
+        }
+        std::cerr << " " << count / elapsed_seconds(start);
+      }
+      {
+        auto start = steady_clock::now();
+        for (QBRecordCollection::unique_id_type id = 0; id < count; ++id) {
+          QBFindMatchingRecords(base_, "column0", std::to_string(id));
+        }
+        std::cerr << " " << count / elapsed_seconds(start);
+      }
 
-//  6. Stress test (large database, >10 million entries)
-//     Repeatedly query for:
-//     e. all of the above
-//
-TEST_F(QBRecordCollectionTest, Stress_MixedResults) {}
+      // Search for all nums.
+      //
+      {
+        auto start = steady_clock::now();
+        for (long num = -count / 4; num <= count / 4; ++num) {
+          db_.find_matching_records("column2", std::to_string(num));
+        }
+        std::cerr << " " << count / 2 / elapsed_seconds(start);
+      }
+      {
+        auto start = steady_clock::now();
+        for (long num = -count / 4; num <= count / 4; ++num) {
+          QBFindMatchingRecords(base_, "column2", std::to_string(num));
+        }
+        std::cerr << " " << count / 2 / elapsed_seconds(start);
+      }
+
+      // Search for all words.
+      //
+      {
+        auto start = steady_clock::now();
+        for (const auto &w : words_) {
+          db_.find_matching_records("column1", w);
+        }
+        std::cerr << " " << words_.size() / elapsed_seconds(start);
+      }
+      {
+        auto start = steady_clock::now();
+        for (const auto &w : words_) {
+          QBFindMatchingRecords(base_, "column1", w);
+        }
+        std::cerr << " " << words_.size() / elapsed_seconds(start);
+      }
+
+      std::cerr << std::endl;
+    }
+  }
+}
 
 } // namespace
